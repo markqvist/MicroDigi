@@ -1,4 +1,7 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#define DIGIPEATER_CALLSIGN "OZ7TMD"
+#define DIGIPEATER_SSID 3
+
 #endif
