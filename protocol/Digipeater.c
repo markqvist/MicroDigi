@@ -23,7 +23,7 @@ uint8_t p = 255;
 void digipeater_processPackets(void) {
     // If we're waiting in CSMA, drop this packet
     if (csma_waiting) frame_len = 0;
-    
+
     if (frame_len != 0) {
         // We have a packet for digipeating,
         // let's process it
@@ -175,8 +175,6 @@ void digipeater_processPackets(void) {
         for (int i = 0; i < payloadLength-2; i++) {
             if (i > 1) packetBufferOut[frame_len_out++] = buf[i];
         }
-
-
 
         // Send it out!
         if (repeat) digipeater_csma(ax25ctx, packetBufferOut, frame_len_out);
