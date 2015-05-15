@@ -20,6 +20,12 @@ bool csma_waiting = false;
 unsigned long slotTime = 200;
 uint8_t p = 255;
 
+#if DIGIPEATER_ROLE == ROLE_FILLIN
+    static int clamp_n = 1;
+#else
+    static int clamp_n = DIGIPEATER_CLAMP_N;
+#endif
+
 void digipeater_processPackets(void) {
     // If we're waiting in CSMA, drop this packet
     if (csma_waiting) frame_len = 0;
@@ -57,31 +63,39 @@ void digipeater_processPackets(void) {
                 // TODO: add own-call specific relay checking
                 if (rpt_list[rpt_count].ssid > 0) {
                     if (memcmp("WIDE", path_call->call, 4) == 0) {
-                        repeat = true;
-                        frame_len_out = 0;
-                        uint8_t rssid = rpt_list[rpt_count].ssid - 1;
-                        if (rssid == 0) {
-                            // If n has reached 0, replace the
-                            // WIDE with our own call, and set
-                            // the H-bit
-                            //memset(rpt_list[rpt_count].call, 0, 6);
-                            memcpy(rpt_list_out[rpt_count_out].call, DIGIPEATER_CALLSIGN, 6);
-                            rpt_list_out[rpt_count_out].ssid = DIGIPEATER_SSID;
-                            rpt_count_out++;
-                        } else {
-                            // If not, insert our own callsign,
-                            // set the H-bit and then add the
-                            // Rest of the WIDE, decrementing
-                            // the n part
-                            memcpy(rpt_list_out[rpt_count_out].call, DIGIPEATER_CALLSIGN, 6);
-                            rpt_list_out[rpt_count_out].ssid = DIGIPEATER_SSID;
-                            rpt_hbits_out |= (0x01 << rpt_count_out);
-                            rpt_count_out++;
+                        char *p = path_call->call + 4;
+                        int n = atoi(p);
+                        int N = rpt_list[rpt_count].ssid;
 
-                            memcpy(rpt_list_out[rpt_count_out].call, rpt_list[rpt_count].call, 6);
-                            rpt_list_out[rpt_count_out].ssid = rssid;
-                            rpt_hbits_out &= 0xFF ^ (0x01 << rpt_count_out);
-                            rpt_count_out++;
+                        printf_P(PSTR("\nDetected: WIDE%d-%d"), n, N);
+
+                        if (n <= clamp_n && N <= clamp_n) {
+                            repeat = true;
+                            frame_len_out = 0;
+                            uint8_t rssid = rpt_list[rpt_count].ssid - 1;
+                            if (rssid == 0) {
+                                // If n has reached 0, replace the
+                                // WIDE with our own call, and set
+                                // the H-bit
+                                //memset(rpt_list[rpt_count].call, 0, 6);
+                                memcpy(rpt_list_out[rpt_count_out].call, DIGIPEATER_CALLSIGN, 6);
+                                rpt_list_out[rpt_count_out].ssid = DIGIPEATER_SSID;
+                                rpt_count_out++;
+                            } else {
+                                // If not, insert our own callsign,
+                                // set the H-bit and then add the
+                                // Rest of the WIDE, decrementing
+                                // the n part
+                                memcpy(rpt_list_out[rpt_count_out].call, DIGIPEATER_CALLSIGN, 6);
+                                rpt_list_out[rpt_count_out].ssid = DIGIPEATER_SSID;
+                                rpt_hbits_out |= (0x01 << rpt_count_out);
+                                rpt_count_out++;
+
+                                memcpy(rpt_list_out[rpt_count_out].call, rpt_list[rpt_count].call, 6);
+                                rpt_list_out[rpt_count_out].ssid = rssid;
+                                rpt_hbits_out &= 0xFF ^ (0x01 << rpt_count_out);
+                                rpt_count_out++;
+                            }
                         }
                     }
                 }
