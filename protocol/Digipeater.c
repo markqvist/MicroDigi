@@ -9,19 +9,26 @@
 #define DECODE_CALL(buf, addr) for (unsigned i = 0; i < sizeof((addr)); i++) { char c = (*(buf)++ >> 1); (addr)[i] = (c == ' ') ? '\x0' : c; }
 
 uint8_t packetBuffer[AX25_MAX_FRAME_LEN]; // Buffer for holding incoming serial data
+uint8_t packetBufferOut[AX25_MAX_FRAME_LEN];
 AX25Ctx *ax25ctx;
 Afsk *channel;
 Serial *serial;
 size_t frame_len;
+size_t frame_len_out;
+bool csma_waiting = false;
 
 unsigned long slotTime = 200;
 uint8_t p = 255;
 
 void digipeater_processPackets(void) {
+    // If we're waiting in CSMA, drop this packet
+    if (csma_waiting) frame_len = 0;
+    
     if (frame_len != 0) {
         // We have a packet for digipeating,
         // let's process it
         uint8_t *buf = packetBuffer;
+        uint8_t *bufStart = packetBuffer;
 
         bool repeat = false;
 
@@ -51,6 +58,7 @@ void digipeater_processPackets(void) {
                 if (rpt_list[rpt_count].ssid > 0) {
                     if (memcmp("WIDE", path_call->call, 4) == 0) {
                         repeat = true;
+                        frame_len_out = 0;
                         uint8_t rssid = rpt_list[rpt_count].ssid - 1;
                         if (rssid == 0) {
                             // If n has reached 0, replace the
@@ -118,9 +126,60 @@ void digipeater_processPackets(void) {
             puts("\n");
         #endif
 
+        // Calculate payload length
+        int payloadLength = frame_len - (buf - bufStart);
+        //printf_P(PSTR("Payload length: %d"), payloadLength);
+
+        // Init outgoing buffer to all zeroes
+        memset(packetBufferOut, 0, AX25_MAX_FRAME_LEN);
+        //uint8_t *out = packetBufferOut;
+
+        char c;
+
+        // Add destination address
+        for (unsigned i = 0; i < sizeof(dst.call); i++) {
+            c = dst.call[i];
+            if (c == '\x0') c = ' ';
+            c = c << 1;
+            packetBufferOut[frame_len_out++] = c;
+        }
+        packetBufferOut[frame_len_out++] = 0x60 | (src.ssid << 1);
+
+        // Add source address
+        for (unsigned i = 0; i < sizeof(src.call); i++) {
+            c = src.call[i];
+            if (c == '\x0') c = ' ';
+            c = c << 1;
+            packetBufferOut[frame_len_out++] = c;
+        }
+        packetBufferOut[frame_len_out++] = 0x60 | (src.ssid << 1);
+
+        // Add path
+        for (int i = 0; i < rpt_count_out; i++) {
+            AX25Call p = rpt_list_out[i];
+            bool set_hbit = false;
+            if ((rpt_hbits_out >> i) & 0x01) set_hbit = true;
+            for (unsigned i = 0; i < sizeof(p.call); i++) {
+                c = p.call[i];
+                if (c == '\x0') c = ' ';
+                c = c << 1;
+                packetBufferOut[frame_len_out++] = c;
+            }
+            packetBufferOut[frame_len_out++] = 0x60 | (p.ssid << 1) | (set_hbit ? 0x80 : 0x00) | (i == rpt_count_out-1 ? 0x01 : 0);
+        }
+
+        packetBufferOut[frame_len_out++] = AX25_CTRL_UI;
+        packetBufferOut[frame_len_out++] = AX25_PID_NOLAYER3;
+
+        // Add payload
+        for (int i = 0; i < payloadLength-2; i++) {
+            if (i > 1) packetBufferOut[frame_len_out++] = buf[i];
+        }
+
+
 
         // Send it out!
-        //if (repeat) digipeater_csma(ax25ctx, packetBuffer, frame_len);
+        if (repeat) digipeater_csma(ax25ctx, packetBufferOut, frame_len_out);
 
         // Reset frame_len to 0
         frame_len = 0;
@@ -136,12 +195,14 @@ void digipeater_init(AX25Ctx *ax25, Afsk *afsk, Serial *ser) {
 
 void digipeater_csma(AX25Ctx *ctx, uint8_t *buf, size_t len) {
     bool sent = false;
+    csma_waiting = true;
     while (!sent) {
         if(!channel->hdlc.receiving) {
             uint8_t tp = rand() & 0xFF;
             if (tp < p) {
                 ax25_sendRaw(ctx, buf, len);
                 sent = true;
+                csma_waiting = false;
             } else {
                 ticks_t start = timer_clock();
                 long slot_ticks = ms_to_ticks(slotTime);
@@ -162,6 +223,7 @@ void digipeater_csma(AX25Ctx *ctx, uint8_t *buf, size_t len) {
                     // this packet silently.
                     channel->status = 0;
                     sent = true;
+                    csma_waiting = false;
                 }
             }
         }
