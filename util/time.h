@@ -27,6 +27,10 @@ inline ticks_t ms_to_ticks(mtime_t ms) {
     return ms * DIV_ROUND(CLOCK_TICKS_PER_SEC, 1000);
 }
 
+inline ticks_t s_to_ticks(mtime_t s) {
+    return s * CLOCK_TICKS_PER_SEC;
+}
+
 inline void cpu_relax(void) {
     // Do nothing!
 }

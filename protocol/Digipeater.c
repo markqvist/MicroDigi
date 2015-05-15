@@ -4,6 +4,7 @@
 
 #include "device.h"
 #include "Digipeater.h"
+#include "util/CRC-CCIT.h"
 
 #define countof(a) sizeof(a)/sizeof(a[0])
 #define DECODE_CALL(buf, addr) for (unsigned i = 0; i < sizeof((addr)); i++) { char c = (*(buf)++ >> 1); (addr)[i] = (c == ' ') ? '\x0' : c; }
@@ -19,6 +20,18 @@ bool csma_waiting = false;
 
 unsigned long slotTime = 200;
 uint8_t p = 255;
+
+typedef struct dupl_entry {
+    bool active;
+    uint8_t crcl;
+    uint8_t crch;
+    ticks_t timestamp;
+} dupl_entry;
+
+#define DUPL_LIST_SIZE 32
+#define DUPL_STALE_TIME 30
+dupl_entry dupl_list[DUPL_LIST_SIZE];
+uint8_t dupl_i = 0;
 
 #if DIGIPEATER_ROLE == ROLE_FILLIN
     static int clamp_n = 1;
@@ -67,8 +80,6 @@ void digipeater_processPackets(void) {
                         int n = atoi(p);
                         int N = rpt_list[rpt_count].ssid;
                         bool dupl_match = false;
-
-                        printf_P(PSTR("\nDetected: WIDE%d-%d"), n, N);
 
                         if (n <= clamp_n && N <= clamp_n && !dupl_match) {
                             repeat = true;
@@ -141,62 +152,101 @@ void digipeater_processPackets(void) {
             puts("\n");
         #endif
 
-        // Calculate payload length
-        int payloadLength = frame_len - (buf - bufStart);
-        //printf_P(PSTR("Payload length: %d"), payloadLength);
+        if (repeat) {
+            // Calculate payload length
+            int payloadLength = frame_len - (buf - bufStart);
+            //printf_P(PSTR("Payload length: %d"), payloadLength);
 
-        // Init outgoing buffer to all zeroes
-        memset(packetBufferOut, 0, AX25_MAX_FRAME_LEN);
-        //uint8_t *out = packetBufferOut;
+            // Init outgoing buffer to all zeroes
+            memset(packetBufferOut, 0, AX25_MAX_FRAME_LEN);
 
-        char c;
+            // We need to calculate a CRC checksum for
+            // the src, dst and information fields only,
+            // used to check for duplicates.
+            ax25ctx->crc_out = CRC_CCIT_INIT_VAL;
 
-        // Add destination address
-        for (unsigned i = 0; i < sizeof(dst.call); i++) {
-            c = dst.call[i];
-            if (c == '\x0') c = ' ';
-            c = c << 1;
-            packetBufferOut[frame_len_out++] = c;
-        }
-        packetBufferOut[frame_len_out++] = 0x60 | (src.ssid << 1);
+            char c;
 
-        // Add source address
-        for (unsigned i = 0; i < sizeof(src.call); i++) {
-            c = src.call[i];
-            if (c == '\x0') c = ' ';
-            c = c << 1;
-            packetBufferOut[frame_len_out++] = c;
-        }
-        packetBufferOut[frame_len_out++] = 0x60 | (src.ssid << 1);
-
-        // Add path
-        for (int i = 0; i < rpt_count_out; i++) {
-            AX25Call p = rpt_list_out[i];
-            bool set_hbit = false;
-            if ((rpt_hbits_out >> i) & 0x01) set_hbit = true;
-            for (unsigned i = 0; i < sizeof(p.call); i++) {
-                c = p.call[i];
+            // Add destination address
+            for (unsigned i = 0; i < sizeof(dst.call); i++) {
+                c = dst.call[i];
                 if (c == '\x0') c = ' ';
                 c = c << 1;
                 packetBufferOut[frame_len_out++] = c;
+                // Update CRC
+                ax25ctx->crc_out = update_crc_ccit(c, ax25ctx->crc_out);
             }
-            packetBufferOut[frame_len_out++] = 0x60 | (p.ssid << 1) | (set_hbit ? 0x80 : 0x00) | (i == rpt_count_out-1 ? 0x01 : 0);
+            packetBufferOut[frame_len_out++] = 0x60 | (src.ssid << 1);
+
+            // Add source address
+            for (unsigned i = 0; i < sizeof(src.call); i++) {
+                c = src.call[i];
+                if (c == '\x0') c = ' ';
+                c = c << 1;
+                packetBufferOut[frame_len_out++] = c;
+                // Update CRC
+                ax25ctx->crc_out = update_crc_ccit(c, ax25ctx->crc_out);
+            }
+            packetBufferOut[frame_len_out++] = 0x60 | (src.ssid << 1);
+
+            // Add path
+            for (int i = 0; i < rpt_count_out; i++) {
+                AX25Call p = rpt_list_out[i];
+                bool set_hbit = false;
+                if ((rpt_hbits_out >> i) & 0x01) set_hbit = true;
+                for (unsigned i = 0; i < sizeof(p.call); i++) {
+                    c = p.call[i];
+                    if (c == '\x0') c = ' ';
+                    c = c << 1;
+                    packetBufferOut[frame_len_out++] = c;
+                }
+                packetBufferOut[frame_len_out++] = 0x60 | (p.ssid << 1) | (set_hbit ? 0x80 : 0x00) | (i == rpt_count_out-1 ? 0x01 : 0);
+            }
+
+            packetBufferOut[frame_len_out++] = AX25_CTRL_UI;
+            packetBufferOut[frame_len_out++] = AX25_PID_NOLAYER3;
+
+            // Add payload
+            for (int i = 0; i < payloadLength-2; i++) {
+                if (i > 1) {
+                    packetBufferOut[frame_len_out++] = buf[i];
+                    // Update CRC
+                    ax25ctx->crc_out = update_crc_ccit(buf[i], ax25ctx->crc_out);
+                }
+            }
+            uint8_t crcl = (ax25ctx->crc_out & 0xff) ^ 0xff;
+            uint8_t crch = (ax25ctx->crc_out >> 8) ^ 0xff;
+
+            if (!is_duplicate(crcl, crch)) {
+                // Send it out!
+                digipeater_csma(ax25ctx, packetBufferOut, frame_len_out);
+
+                // Add packet to duplicate checklist
+                dupl_list[dupl_i].crcl = crcl;
+                dupl_list[dupl_i].crch = crch;
+                dupl_list[dupl_i].timestamp = timer_clock();
+                dupl_list[dupl_i].active = true;
+                dupl_i = (dupl_i + 1) % DUPL_LIST_SIZE;
+            }
         }
-
-        packetBufferOut[frame_len_out++] = AX25_CTRL_UI;
-        packetBufferOut[frame_len_out++] = AX25_PID_NOLAYER3;
-
-        // Add payload
-        for (int i = 0; i < payloadLength-2; i++) {
-            if (i > 1) packetBufferOut[frame_len_out++] = buf[i];
-        }
-
-        // Send it out!
-        if (repeat) digipeater_csma(ax25ctx, packetBufferOut, frame_len_out);
 
         // Reset frame_len to 0
         frame_len = 0;
     }
+}
+
+bool is_duplicate(uint8_t crcl, uint8_t crch) {
+    ticks_t now = timer_clock();
+    for (int i = 0; i < DUPL_LIST_SIZE; i++) {
+        if (dupl_list[i].active && now - dupl_list[i].timestamp < s_to_ticks(DUPL_STALE_TIME)) {
+            if (dupl_list[i].crcl == crcl && dupl_list[i].crch == crch) {
+                return true;
+            }
+        } else {
+            dupl_list[i].active = false;
+        }
+    }
+    return false;
 }
 
 void digipeater_init(AX25Ctx *ax25, Afsk *afsk, Serial *ser) {

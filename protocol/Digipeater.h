@@ -25,6 +25,7 @@ AX25Call dst;
 void digipeater_init(AX25Ctx *ax25, Afsk *afsk, Serial *ser);
 void digipeater_csma(AX25Ctx *ctx, uint8_t *buf, size_t len);
 void digipeater_messageCallback(AX25Ctx *ctx);
+bool is_duplicate(uint8_t crcl, uint8_t crch);
 void digipeater_processPackets(void);
 
 #endif
