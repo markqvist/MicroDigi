@@ -66,10 +66,11 @@ void digipeater_processPackets(void) {
                         char *p = path_call->call + 4;
                         int n = atoi(p);
                         int N = rpt_list[rpt_count].ssid;
+                        bool dupl_match = false;
 
                         printf_P(PSTR("\nDetected: WIDE%d-%d"), n, N);
 
-                        if (n <= clamp_n && N <= clamp_n) {
+                        if (n <= clamp_n && N <= clamp_n && !dupl_match) {
                             repeat = true;
                             frame_len_out = 0;
                             uint8_t rssid = rpt_list[rpt_count].ssid - 1;
