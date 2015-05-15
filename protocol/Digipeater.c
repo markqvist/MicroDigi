@@ -18,8 +18,8 @@ size_t frame_len;
 size_t frame_len_out;
 bool csma_waiting = false;
 
-unsigned long slotTime = 200;
-uint8_t p = 255;
+unsigned long slotTime = DIGIPEATER_CSMA_SLOT_TIME;
+uint8_t p = DIGIPEATER_CSMA_PERSISTENCE;
 
 typedef struct dupl_entry {
     bool active;
@@ -28,8 +28,6 @@ typedef struct dupl_entry {
     ticks_t timestamp;
 } dupl_entry;
 
-#define DUPL_LIST_SIZE 32
-#define DUPL_STALE_TIME 30
 dupl_entry dupl_list[DUPL_LIST_SIZE];
 uint8_t dupl_i = 0;
 

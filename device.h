@@ -17,15 +17,8 @@
 // Sampling & timer setup
 #define CONFIG_AFSK_DAC_SAMPLERATE 9600
 
-// Serial protocol settings
-#define SERIAL_PROTOCOL PROTOCOL_KISS
-// OR
-//#define SERIAL_PROTOCOL PROTOCOL_SIMPLE_SERIAL
-
 // AX25 settings
-#if SERIAL_PROTOCOL == PROTOCOL_SIMPLE_SERIAL
-    #define CUSTOM_FRAME_SIZE 330
-#endif
+#define CUSTOM_FRAME_SIZE 330
 
 // Serial settings
 #define BAUD 9600

@@ -13,4 +13,18 @@
 // will relay. This looks at both n and N.
 #define DIGIPEATER_CLAMP_N 2
 
+// Set CSMA slot time
+#define DIGIPEATER_CSMA_SLOT_TIME 200
+
+// Set CSMA persistence value
+#define DIGIPEATER_CSMA_PERSISTENCE 127
+
+// How many packets to keep in the duplicate
+// checklist
+#define DUPL_LIST_SIZE 32
+
+// How long a packet is kept in the duplicate
+// checklist
+#define DUPL_STALE_TIME 30
+
 #endif
