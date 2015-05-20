@@ -13,6 +13,11 @@
 // will relay. This looks at both n and N.
 #define DIGIPEATER_CLAMP_N 2
 
+// Whether to digipeat packets that specify a
+// path directly through the digipeaters call-
+// sign and SSID
+#define SPECIFIC_DIGIPEAT true
+
 // Set CSMA slot time
 #define DIGIPEATER_CSMA_SLOT_TIME 200
 

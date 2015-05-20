@@ -6,6 +6,7 @@
 #include "Digipeater.h"
 #include "util/CRC-CCIT.h"
 
+#define MIN(a,b) ({ typeof(a) _a = (a); typeof(b) _b = (b); ((typeof(_a))((_a < _b) ? _a : _b)); })
 #define countof(a) sizeof(a)/sizeof(a[0])
 #define DECODE_CALL(buf, addr) for (unsigned i = 0; i < sizeof((addr)); i++) { char c = (*(buf)++ >> 1); (addr)[i] = (c == ' ') ? '\x0' : c; }
 
@@ -20,6 +21,7 @@ bool csma_waiting = false;
 
 unsigned long slotTime = DIGIPEATER_CSMA_SLOT_TIME;
 uint8_t p = DIGIPEATER_CSMA_PERSISTENCE;
+bool specificDigipeat = SPECIFIC_DIGIPEAT;
 
 typedef struct dupl_entry {
     bool active;
@@ -48,6 +50,7 @@ void digipeater_processPackets(void) {
         uint8_t *bufStart = packetBuffer;
 
         bool repeat = false;
+        bool unrelated = false;
 
         DECODE_CALL(buf, dst.call);
         dst.ssid = (*buf++ >> 1) & 0x0F;
@@ -65,49 +68,65 @@ void digipeater_processPackets(void) {
             bool hbit = (*buf >> 7);
             rpt_hbits |= (hbit << rpt_count);
 
-            if (!hbit && !repeat) {
+            if (!hbit && !repeat && !unrelated) {
                 // If the H-bit is not set, this path
                 // component is active, and we should
                 // check whether to digipeat
                 AX25Call *path_call = &rpt_list[rpt_count];
 
-                // TODO: add own-call specific relay checking
-                if (rpt_list[rpt_count].ssid > 0) {
-                    if (memcmp("WIDE", path_call->call, 4) == 0) {
-                        char *p = path_call->call + 4;
-                        int n = atoi(p);
-                        int N = rpt_list[rpt_count].ssid;
-                        bool dupl_match = false;
+                if (specificDigipeat && memcmp(DIGIPEATER_CALLSIGN, path_call->call, MIN(sizeof(path_call->call), strlen(path_call->call))) == 0 && rpt_list[rpt_count].ssid == DIGIPEATER_SSID) {
+                    // This packet is relayed through
+                    // us specifically
+                    memcpy(rpt_list_out[rpt_count_out].call, DIGIPEATER_CALLSIGN, 6);
+                    rpt_list_out[rpt_count_out].ssid = DIGIPEATER_SSID;
+                    rpt_hbits_out |= (0x01 << rpt_count_out);
+                    rpt_count_out++;
+                    repeat = true;
+                    frame_len_out = 0;
+                } else {
+                    if (rpt_list[rpt_count].ssid > 0) {
+                        if (memcmp("WIDE", path_call->call, 4) == 0) {
+                            char *p = path_call->call + 4;
+                            int n = atoi(p);
+                            int N = rpt_list[rpt_count].ssid;
+                            bool dupl_match = false;
 
-                        if (n <= clamp_n && N <= clamp_n && !dupl_match) {
-                            repeat = true;
-                            frame_len_out = 0;
-                            uint8_t rssid = rpt_list[rpt_count].ssid - 1;
-                            if (rssid == 0) {
-                                // If n has reached 0, replace the
-                                // WIDE with our own call, and set
-                                // the H-bit
-                                //memset(rpt_list[rpt_count].call, 0, 6);
-                                memcpy(rpt_list_out[rpt_count_out].call, DIGIPEATER_CALLSIGN, 6);
-                                rpt_list_out[rpt_count_out].ssid = DIGIPEATER_SSID;
-                                rpt_hbits_out |= (0x01 << rpt_count_out);
-                                rpt_count_out++;
+                            if (n <= clamp_n && N <= clamp_n && !dupl_match) {
+                                repeat = true;
+                                frame_len_out = 0;
+                                uint8_t rssid = rpt_list[rpt_count].ssid - 1;
+                                if (rssid == 0) {
+                                    // If n has reached 0, replace the
+                                    // WIDE with our own call, and set
+                                    // the H-bit
+                                    //memset(rpt_list[rpt_count].call, 0, 6);
+                                    memcpy(rpt_list_out[rpt_count_out].call, DIGIPEATER_CALLSIGN, 6);
+                                    rpt_list_out[rpt_count_out].ssid = DIGIPEATER_SSID;
+                                    rpt_hbits_out |= (0x01 << rpt_count_out);
+                                    rpt_count_out++;
+                                } else {
+                                    // If not, insert our own callsign,
+                                    // set the H-bit and then add the
+                                    // Rest of the WIDE, decrementing
+                                    // the n part
+                                    memcpy(rpt_list_out[rpt_count_out].call, DIGIPEATER_CALLSIGN, 6);
+                                    rpt_list_out[rpt_count_out].ssid = DIGIPEATER_SSID;
+                                    rpt_hbits_out |= (0x01 << rpt_count_out);
+                                    rpt_count_out++;
+
+                                    memcpy(rpt_list_out[rpt_count_out].call, rpt_list[rpt_count].call, 6);
+                                    rpt_list_out[rpt_count_out].ssid = rssid;
+                                    rpt_hbits_out &= 0xFF ^ (0x01 << rpt_count_out);
+                                    rpt_count_out++;
+                                }
                             } else {
-                                // If not, insert our own callsign,
-                                // set the H-bit and then add the
-                                // Rest of the WIDE, decrementing
-                                // the n part
-                                memcpy(rpt_list_out[rpt_count_out].call, DIGIPEATER_CALLSIGN, 6);
-                                rpt_list_out[rpt_count_out].ssid = DIGIPEATER_SSID;
-                                rpt_hbits_out |= (0x01 << rpt_count_out);
-                                rpt_count_out++;
-
-                                memcpy(rpt_list_out[rpt_count_out].call, rpt_list[rpt_count].call, 6);
-                                rpt_list_out[rpt_count_out].ssid = rssid;
-                                rpt_hbits_out &= 0xFF ^ (0x01 << rpt_count_out);
-                                rpt_count_out++;
+                                unrelated = true;
                             }
+                        } else {
+                            unrelated = true;
                         }
+                    } else {
+                        unrelated = true;
                     }
                 }
             } else {
@@ -134,7 +153,7 @@ void digipeater_processPackets(void) {
                 }
             }
 
-            if (repeat) {
+            if (repeat && !unrelated) {
                 printf("\nTXd Path (%d): ", rpt_count_out);
                 for (uint8_t i = 0; i < rpt_count_out; i++) {
                     if ((rpt_hbits_out >> i) & 0x01) {
@@ -150,7 +169,7 @@ void digipeater_processPackets(void) {
             printf("\n");
         #endif
 
-        if (repeat) {
+        if (repeat && !unrelated) {
             // Calculate payload length
             int payloadLength = frame_len - (buf - bufStart);
             //printf_P(PSTR("Payload length: %d"), payloadLength);
