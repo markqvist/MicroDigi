@@ -22,7 +22,7 @@
 
 // Serial settings
 #define BAUD 9600
-#define SERIAL_DEBUG false
+#define SERIAL_DEBUG true
 #define TX_MAXWAIT 2UL
 
 // Port settings

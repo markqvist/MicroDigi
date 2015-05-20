@@ -65,7 +65,7 @@ void digipeater_processPackets(void) {
             bool hbit = (*buf >> 7);
             rpt_hbits |= (hbit << rpt_count);
 
-            if (!hbit) {
+            if (!hbit && !repeat) {
                 // If the H-bit is not set, this path
                 // component is active, and we should
                 // check whether to digipeat
@@ -90,6 +90,7 @@ void digipeater_processPackets(void) {
                                 //memset(rpt_list[rpt_count].call, 0, 6);
                                 memcpy(rpt_list_out[rpt_count_out].call, DIGIPEATER_CALLSIGN, 6);
                                 rpt_list_out[rpt_count_out].ssid = DIGIPEATER_SSID;
+                                rpt_hbits_out |= (0x01 << rpt_count_out);
                                 rpt_count_out++;
                             } else {
                                 // If not, insert our own callsign,
@@ -112,7 +113,7 @@ void digipeater_processPackets(void) {
             } else {
                 memcpy(rpt_list_out[rpt_count_out].call, rpt_list[rpt_count].call, 6);
                 rpt_list_out[rpt_count_out].ssid = rpt_list[rpt_count].ssid;
-                rpt_hbits_out |= (0x01 << rpt_count_out);
+                if (hbit) rpt_hbits_out |= (0x01 << rpt_count_out);
                 rpt_count_out++;
             }
 
@@ -146,8 +147,7 @@ void digipeater_processPackets(void) {
                     }
                 }    
             }
-            
-            puts("\n");
+            printf("\n");
         #endif
 
         if (repeat) {
@@ -225,11 +225,20 @@ void digipeater_processPackets(void) {
                 dupl_list[dupl_i].timestamp = timer_clock();
                 dupl_list[dupl_i].active = true;
                 dupl_i = (dupl_i + 1) % DUPL_LIST_SIZE;
+            } else {
+                #if SERIAL_DEBUG
+                    printf("Duplicate detected, dropping packet\n");
+                #endif
             }
         }
 
+        #if SERIAL_DEBUG
+            printf("\n");
+        #endif
+
         // Reset frame_len to 0
         frame_len = 0;
+        rpt_hbits_out = 0x00;
     }
 }
 
