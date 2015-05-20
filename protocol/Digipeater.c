@@ -165,6 +165,8 @@ void digipeater_processPackets(void) {
                         printf_P(PSTR("[%.6s-%d] "), rpt_list_out[i].call, rpt_list_out[i].ssid);
                     }
                 }    
+            } else {
+                printf("\nNot digipeating");
             }
             printf("\n");
         #endif
