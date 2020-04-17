@@ -195,7 +195,7 @@ void digipeater_processPackets(void) {
                 // Update CRC
                 ax25ctx->crc_out = update_crc_ccit(c, ax25ctx->crc_out);
             }
-            packetBufferOut[frame_len_out++] = 0x60 | (src.ssid << 1);
+            packetBufferOut[frame_len_out++] = 0x60 | (dst.ssid << 1);
 
             // Add source address
             for (unsigned i = 0; i < sizeof(src.call); i++) {
